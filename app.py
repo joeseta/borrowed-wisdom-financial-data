@@ -329,8 +329,13 @@ elif view=="Spend less":
             a,b=st.columns(2)
             a.metric("Spend less each month",money(selected))
             b.metric("Still need each month",money(remaining))
-            if remaining>0: st.warning(f"**You still need {money(remaining)} each month.**")
-            else: st.success("**Your selected reductions cover this month's reported gap. Now follow through.**")
+            surplus=max(0.,selected-shortfall)
+            if remaining>0:
+                st.warning(f"**You still need {money(remaining)} each month.**")
+            elif surplus>0:
+                st.success(f"**You covered the {money(shortfall)} gap and planned another {money(surplus)} in cuts. That could leave {money(surplus)} extra each month.**")
+            else:
+                st.success("**Your selected reductions cover this month's reported gap. Now follow through.**")
             st.button("See what my cuts change",type="primary",use_container_width=True,on_click=change_screen,args=("See my future",))
     with st.expander("Show spending by category"):
         st.dataframe(by_cat[["Category","net_spend"]].rename(columns={"net_spend":"Net spending ($)"}),use_container_width=True,hide_index=True)
@@ -338,8 +343,10 @@ else:
     st.subheader("SHOW ME THE MONEY!")
     selected = total_selected()
     after = max(0., shortfall-selected)
+    surplus = max(0., selected-shortfall)
     if shortfall > 0:
         st.markdown(f"**You spend {money(shortfall)} more than you earn each month. Where will you get the money?**")
+        cut_result = f"{money(surplus)} extra / month" if surplus > 0 else f"{money(after)} short / month" if after > 0 else "$0 short / month"
         st.markdown(
             '<div style="display:flex;gap:12px;flex-wrap:wrap;margin:16px 0 20px">'
             f'<div style="flex:1;min-width:180px;border-left:5px solid #c52332;background:#fff1f2;padding:14px;border-radius:8px">'
@@ -356,7 +363,7 @@ else:
         if funding == "Using savings":
             savings = st.number_input("Savings available ($)", min_value=0, max_value=1000000, value=10000, step=100, key="bw2_savings")
             without = [savings - shortfall*m for m in periods]
-            with_cuts = [savings - after*m for m in periods]
+            with_cuts = [savings + (surplus-after)*m for m in periods]
             st.markdown("**How much money will you have—or still need?**")
             compare_bars(without, with_cuts, labels, "savings")
             months_to_empty = ceil(savings/shortfall) if savings else 0
@@ -368,7 +375,7 @@ else:
                     st.success(f"**With your selected cuts, you could have {money(with_cuts[-1])} left after 12 months.**")
                 else:
                     st.warning(f"**Even with your selected cuts, you would still need {money(-with_cuts[-1])} after 12 months.**")
-            st.caption("Illustration assumes the latest month's net spending gap repeats, no savings interest and no other activity. Below zero means an unfunded shortage, not a negative bank balance. Proposed cuts are not confirmed savings.")
+            st.caption("Illustration assumes the latest month's net spending gap repeats, all selected cuts happen, extra money is saved, no savings interest and no other activity. Below zero means an unfunded shortage, not a negative bank balance.")
         else:
             def debt(gap):
                 balance=0.0
@@ -383,7 +390,10 @@ else:
             compare_bars(without,with_cuts,labels,"debt")
             st.error(f"**After 12 months, without changes you could owe {money(without[-1])}. Where will you get the money?**")
             if selected:
-                st.success(f"**With your selected cuts, you could owe {money(with_cuts[-1])}.**")
+                if surplus > 0:
+                    st.success(f"**Your cuts could avoid new debt and leave {money(surplus)} extra each month ({money(surplus*12)} over 12 months). This extra money is not included as debt repayment in the chart.**")
+                else:
+                    st.success(f"**With your selected cuts, you could owe {money(with_cuts[-1])}.**")
             st.caption("Illustration: 25% APR, monthly compounding, additional borrowing at the end of each month, no repayments or fees. Actual credit cards require payments and have varying terms.")
         st.button("← Go back to ways to spend less",type="primary",use_container_width=True,on_click=change_screen,args=("Spend less",))
     else:
