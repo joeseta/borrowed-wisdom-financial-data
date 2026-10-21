@@ -327,13 +327,13 @@ elif view=="Spend less":
             selected=total_selected()
             remaining=max(0.,shortfall-selected)
             a,b=st.columns(2)
-            a.metric("Spend less each month",money(selected))
-            b.metric("Still need each month",money(remaining))
+            a.metric("Your planned monthly cuts",money(selected))
+            b.metric("Extra to save each month" if selected > shortfall else "Still need each month",money(max(0.,selected-shortfall)) if selected > shortfall else money(remaining))
             surplus=max(0.,selected-shortfall)
             if remaining>0:
                 st.warning(f"**You still need {money(remaining)} each month.**")
             elif surplus>0:
-                st.success(f"**You covered the {money(shortfall)} gap and planned another {money(surplus)} in cuts. That could leave {money(surplus)} extra each month.**")
+                st.success(f"**Your {money(selected)} in monthly cuts covers the {money(shortfall)} shortage. You could now save {money(surplus)} each month — {money(surplus*12)} in one year.**")
             else:
                 st.success("**Your selected reductions cover this month's reported gap. Now follow through.**")
             st.button("See what my cuts change",type="primary",use_container_width=True,on_click=change_screen,args=("See my future",))
@@ -354,7 +354,7 @@ else:
             f'<div style="font-size:25px;font-weight:800;color:#aa202b">{money(shortfall)} / month</div></div>'
             f'<div style="flex:1;min-width:180px;border-left:5px solid #168a50;background:#eefaf2;padding:14px;border-radius:8px">'
             f'<div style="font-size:15px;font-weight:700">With your selected cuts</div>'
-            f'<div style="font-size:25px;font-weight:800;color:#127846">{money(after)} / month</div></div></div>',
+            f'<div style="font-size:25px;font-weight:800;color:#127846">{cut_result}</div></div></div>',
             unsafe_allow_html=True,
         )
         funding = st.radio("How are you covering the extra spending?", ["Using savings", "Using a credit card"], horizontal=True, key="bw2_funding")
@@ -364,7 +364,7 @@ else:
             savings = st.number_input("Savings available ($)", min_value=0, max_value=1000000, value=10000, step=100, key="bw2_savings")
             without = [savings - shortfall*m for m in periods]
             with_cuts = [savings + (surplus-after)*m for m in periods]
-            st.markdown("**How much money will you have—or still need?**")
+            st.markdown("**How will your savings change?**" if surplus > 0 else "**How much money will you have—or still need?**")
             compare_bars(without, with_cuts, labels, "savings")
             months_to_empty = ceil(savings/shortfall) if savings else 0
             st.error(f"**If nothing changes, your {money(savings)} savings run out in about {months_to_empty} months.**")
@@ -372,7 +372,11 @@ else:
                 st.error(f"**At 12 months, your savings are gone. You still need {money(-without[-1])}. Where will you get the money?**")
             if selected:
                 if with_cuts[-1] >= 0:
-                    st.success(f"**With your selected cuts, you could have {money(with_cuts[-1])} left after 12 months.**")
+                    if surplus > 0:
+                        st.success(f"**YOUR MONEY IS GROWING.** You could add {money(surplus*12)} to savings in one year. Starting with {money(savings)}, you could reach **{money(with_cuts[-1])}** after 12 months.")
+                        st.markdown(f"**Your decision makes a {money((selected)*12)} difference over 12 months** compared with making no changes. That's money you don't spend, not an assumed investment return.")
+                    else:
+                        st.success(f"**With your selected cuts, you could have {money(with_cuts[-1])} left after 12 months.**")
                 else:
                     st.warning(f"**Even with your selected cuts, you would still need {money(-with_cuts[-1])} after 12 months.**")
             st.caption("Illustration assumes the latest month's net spending gap repeats, all selected cuts happen, extra money is saved, no savings interest and no other activity. Below zero means an unfunded shortage, not a negative bank balance.")
@@ -391,7 +395,7 @@ else:
             st.error(f"**After 12 months, without changes you could owe {money(without[-1])}. Where will you get the money?**")
             if selected:
                 if surplus > 0:
-                    st.success(f"**Your cuts could avoid new debt and leave {money(surplus)} extra each month ({money(surplus*12)} over 12 months). This extra money is not included as debt repayment in the chart.**")
+                    st.success(f"**YOU CAN START SAVING.** Your cuts could avoid new borrowing and free up **{money(surplus)} each month**, or **{money(surplus*12)} over 12 months**. The green chart shows debt avoided, not your growing savings; this extra money is not applied as debt repayment.")
                 else:
                     st.success(f"**With your selected cuts, you could owe {money(with_cuts[-1])}.**")
             st.caption("Illustration: 25% APR, monthly compounding, additional borrowing at the end of each month, no repayments or fees. Actual credit cards require payments and have varying terms.")
