@@ -28,7 +28,10 @@ h2,h3{font-size:1.3rem!important;font-weight:750!important;letter-spacing:-.02em
 .stButton>button[kind="primary"]{background:var(--bw-blue)!important;color:white!important}
 [data-testid="stExpander"]{border:1px solid #c8d7e7!important;border-radius:9px!important}
 [data-testid="stExpander"] summary{background:#eef4fc;font-weight:700;color:#174f95}
-@media(max-width:600px){.block-container{padding:1rem 1rem 2rem}h1{font-size:1.7rem!important}}
+.bw-expense-amount{font-size:1.07rem;text-align:right;padding-right:1.35rem;white-space:nowrap;color:#14263e;}
+[data-testid="stCheckbox"] label{font-size:1.04rem!important;}
+[data-testid="stNumberInput"] input{font-size:1rem!important;}
+@media(max-width:600px){.block-container{padding:1rem 1rem 2rem}h1{font-size:1.7rem!important}.bw-expense-amount{padding-right:.25rem}}
 </style>""",unsafe_allow_html=True)
 
 DEMO = """Income/Expense,Category,Month,Amount
@@ -229,8 +232,8 @@ elif view=="Spend less":
     if shortfall<=0:
         st.success("The latest month shows no reported shortage. Review future bills before spending what remains.")
     else:
-        st.markdown(f"**You need to reduce spending by {money(shortfall)}. Start here.**")
-        st.caption("Choose what you will reduce. Nothing is selected for you.")
+        st.markdown(f"**You need to reduce monthly spending by {money(shortfall)}. Start here.**")
+        st.caption("Choose what you’ll stop or reduce. Nothing is selected for you.")
         if optional.empty:
             st.info("No clearly optional spending categories were found in the latest month's summary.")
         else:
@@ -242,12 +245,12 @@ elif view=="Spend less":
                 # Restore widget values when returning to this screen.
                 if ui_yes not in st.session_state: st.session_state[ui_yes]=st.session_state[saved_yes]
                 if ui_amt not in st.session_state: st.session_state[ui_amt]=min(maximum,float(st.session_state[saved_amt]))
-                # Match Phase 1's compact, aligned expense table.
+                # Match Phase 1 demo: fixed three-column grid with aligned amounts and controls.
                 left, mid, right = st.columns([2.7, 1.3, 2.0], vertical_alignment="center")
                 with left:
                     active = st.checkbox(cat, key=ui_yes, on_change=keep_choice, args=(cat,))
                 with mid:
-                    st.write(money(maximum))
+                    st.markdown(f'<div class="bw-expense-amount">{money(maximum)}</div>', unsafe_allow_html=True)
                 with right:
                     if active:
                         amount_col, all_col = st.columns([3, 1], vertical_alignment="center")
@@ -262,7 +265,7 @@ elif view=="Spend less":
                                       args=(cat,maximum), use_container_width=True,
                                       help=f"Stop all {money(maximum)} of this spending")
                     else:
-                        st.caption("Select to reduce")
+                        st.caption(f"Available to reduce: {money(maximum)}")
             selected=total_selected()
             remaining=max(0.,shortfall-selected)
             a,b=st.columns(2)
