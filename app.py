@@ -124,6 +124,13 @@ def money(n: float) -> str:
 
 
 def change_screen(where: str):
+    # Commit every displayed input before Streamlit removes its widget state.
+    # A click on navigation can happen before a number input loses focus.
+    if st.session_state.get("bw2_screen") == "Spend less":
+        for cat in st.session_state.get("bw2_current_categories", []):
+            keep_choice(cat)
+    if st.session_state.get("bw2_screen") != where:
+        st.session_state["bw2_visit"] = st.session_state.get("bw2_visit", 0) + 1
     st.session_state["bw2_screen"] = where
 
 
@@ -230,7 +237,11 @@ def essential_category(category: str) -> bool:
 def keys(cat):
     digest = hashlib.sha256(cat.encode()).hexdigest()[:12]
     prefix = f"bw2_{fingerprint}_{month}_{digest}"
-    return prefix+"_saved_checked",prefix+"_saved_amount",prefix+"_ui_checked",prefix+"_ui_amount"
+    # Widget IDs change each time a hidden screen is revisited. The saved
+    # values do not. This avoids Streamlit restoring old, stale UI values.
+    visit = st.session_state.get("bw2_visit", 0)
+    return (prefix+"_saved_checked", prefix+"_saved_amount",
+            prefix+f"_ui_checked_{visit}", prefix+f"_ui_amount_{visit}")
 
 def keep_choice(cat):
     saved_yes,saved_amt,ui_yes,ui_amt=keys(cat)
@@ -255,6 +266,8 @@ def total_selected():
     return total
 
 st.session_state.setdefault("bw2_screen","Today")
+st.session_state.setdefault("bw2_visit", 0)
+st.session_state["bw2_current_categories"] = spend_categories["Category"].astype(str).tolist()
 nav=st.columns(3)
 for col,name in zip(nav,["Today","Spend less","See my future"]):
     with col:
@@ -288,7 +301,7 @@ elif view=="Spend less":
         st.success("The latest month shows no reported shortage. Review future bills before spending what remains.")
     else:
         st.markdown(f"**You need to reduce monthly spending by {money(shortfall)}. Start here.**")
-        st.caption("Choose what you’ll stop or reduce. Nothing is selected for you. Essential bills must still be paid unless their cost actually changes.")
+        st.caption("Choose what you'll stop or reduce. Your changes are kept when you switch screens. Essential bills must still be paid unless their cost actually changes.")
         if spend_categories.empty:
             st.info("No expense categories with positive net spending were found in the latest month's summary.")
         else:
@@ -298,8 +311,10 @@ elif view=="Spend less":
                 st.session_state.setdefault(saved_yes,False)
                 st.session_state.setdefault(saved_amt,0.0)
                 # Restore widget values when returning to this screen.
-                if ui_yes not in st.session_state: st.session_state[ui_yes]=st.session_state[saved_yes]
-                if ui_amt not in st.session_state: st.session_state[ui_amt]=min(maximum,float(st.session_state[saved_amt]))
+                if ui_yes not in st.session_state:
+                    st.session_state[ui_yes] = st.session_state[saved_yes]
+                if ui_amt not in st.session_state:
+                    st.session_state[ui_amt] = min(maximum, float(st.session_state[saved_amt]))
                 # Match Phase 1 demo: fixed three-column grid with aligned amounts and controls.
                 left, mid, right = st.columns([2.7, 1.3, 2.0], vertical_alignment="center")
                 with left:
@@ -327,13 +342,21 @@ elif view=="Spend less":
             selected=total_selected()
             remaining=max(0.,shortfall-selected)
             a,b=st.columns(2)
-            a.metric("Your planned monthly cuts",money(selected))
-            b.metric("Extra to save each month" if selected > shortfall else "Still need each month",money(max(0.,selected-shortfall)) if selected > shortfall else money(remaining))
+            a.metric("Your planned monthly cuts", money(selected))
+            if selected > shortfall:
+                b.markdown(f'<div style="font-size:14px">Extra to save each month</div><div style="font-size:40px;line-height:1.35;font-weight:700;color:#168a50">{money(selected-shortfall)}</div>', unsafe_allow_html=True)
+            elif remaining > 0:
+                b.markdown(f'<div style="font-size:14px">Still need each month</div><div style="font-size:40px;line-height:1.35;font-weight:700;color:#c52332">{money(remaining)}</div>', unsafe_allow_html=True)
+            else:
+                b.markdown('<div style="font-size:14px">Still need each month</div><div style="font-size:40px;line-height:1.35;font-weight:700;color:#168a50">$0</div>', unsafe_allow_html=True)
             surplus=max(0.,selected-shortfall)
             if remaining>0:
                 st.warning(f"**You still need {money(remaining)} each month.**")
             elif surplus>0:
-                st.success(f"**Your {money(selected)} in monthly cuts covers the {money(shortfall)} shortage. You could now save {money(surplus)} each month — {money(surplus*12)} in one year.**")
+                st.success(
+                    f"**Your {money(selected)} in planned monthly cuts covers the {money(shortfall)} shortage. "
+                    f"You could save an extra {money(surplus)} each month — {money(surplus*12)} in one year.**"
+                )
             else:
                 st.success("**Your selected reductions cover this month's reported gap. Now follow through.**")
             st.button("See what my cuts change",type="primary",use_container_width=True,on_click=change_screen,args=("See my future",))
@@ -346,7 +369,9 @@ else:
     surplus = max(0., selected-shortfall)
     if shortfall > 0:
         st.markdown(f"**You spend {money(shortfall)} more than you earn each month. Where will you get the money?**")
-        cut_result = f"{money(surplus)} extra / month" if surplus > 0 else f"{money(after)} short / month" if after > 0 else "$0 short / month"
+        cut_result = (f"{money(surplus)} to save / month" if surplus > 0
+                      else f"{money(after)} short / month" if after > 0
+                      else "$0 short / month")
         st.markdown(
             '<div style="display:flex;gap:12px;flex-wrap:wrap;margin:16px 0 20px">'
             f'<div style="flex:1;min-width:180px;border-left:5px solid #c52332;background:#fff1f2;padding:14px;border-radius:8px">'
@@ -364,7 +389,7 @@ else:
             savings = st.number_input("Savings available ($)", min_value=0, max_value=1000000, value=10000, step=100, key="bw2_savings")
             without = [savings - shortfall*m for m in periods]
             with_cuts = [savings + (surplus-after)*m for m in periods]
-            st.markdown("**How will your savings change?**" if surplus > 0 else "**How much money will you have—or still need?**")
+            st.markdown("**How could your savings grow?**" if surplus > 0 else "**How much money will you have—or still need?**")
             compare_bars(without, with_cuts, labels, "savings")
             months_to_empty = ceil(savings/shortfall) if savings else 0
             st.error(f"**If nothing changes, your {money(savings)} savings run out in about {months_to_empty} months.**")
@@ -374,7 +399,14 @@ else:
                 if with_cuts[-1] >= 0:
                     if surplus > 0:
                         st.success(f"**YOUR MONEY IS GROWING.** You could add {money(surplus*12)} to savings in one year. Starting with {money(savings)}, you could reach **{money(with_cuts[-1])}** after 12 months.")
-                        st.markdown(f"**Your decision makes a {money((selected)*12)} difference over 12 months** compared with making no changes. That's money you don't spend, not an assumed investment return.")
+                        st.markdown(
+                            f'<div style="background:#e8f7ed;border-left:5px solid #168a50;'
+                            f'padding:15px 17px;border-radius:8px;margin:12px 0;'
+                            f'color:#087343;font-size:17px;font-weight:700">'
+                            f'Your spending cuts could put {money(selected*12)} more in your savings over 12 months '
+                            f'than making no changes.</div>', unsafe_allow_html=True
+                        )
+                        st.caption("This difference comes from spending less, not investment growth.")
                     else:
                         st.success(f"**With your selected cuts, you could have {money(with_cuts[-1])} left after 12 months.**")
                 else:
