@@ -9,6 +9,7 @@ import calendar
 import io
 import hashlib
 import re
+from math import ceil
 from datetime import date
 
 import pandas as pd
@@ -125,6 +126,53 @@ def money(n: float) -> str:
 def change_screen(where: str):
     st.session_state["bw2_screen"] = where
 
+
+def compare_bars(original, changed, labels, unit="savings"):
+    """Compare paths. Savings may go below zero: that is an unfunded gap, not a bank balance."""
+    color_bad = "#c52332"
+    color_good = "#168a50"
+    cards = []
+    if unit == "savings":
+        # Common zero line across all dates; negative portions drop below it.
+        top_limit = max([0, *original, *changed, 1])
+        bottom_limit = max([0, *(-x for x in original), *(-x for x in changed), 1])
+        top_px, bottom_px = 135, 64
+
+        def bar(value, color):
+            above = round(max(0, value) / top_limit * top_px)
+            below = round(max(0, -value) / bottom_limit * bottom_px) if bottom_limit > 1 else 0
+            label = money(value) if value >= 0 else f"SHORT {money(-value)}"
+            return (f'<div style="flex:1;min-width:0;text-align:center">'
+                    f'<div style="font-size:clamp(10px,1.55vw,14px);font-weight:750;'
+                    f'color:{color};white-space:normal;min-height:36px">{label}</div>'
+                    f'<div style="height:{top_px}px;display:flex;align-items:flex-end;justify-content:center">'
+                    f'<div style="height:{above}px;width:80%;background:{color};border-radius:5px 5px 0 0"></div></div>'
+                    f'<div style="border-top:2px solid #566477;height:{bottom_px}px;'
+                    f'display:flex;align-items:flex-start;justify-content:center">'
+                    f'<div style="height:{below}px;width:80%;background:#991b1b;'
+                    f'border-radius:0 0 5px 5px"></div></div></div>')
+    else:
+        maximum = max([*original, *changed, 1])
+        def bar(value, color):
+            height = max(3, round(max(0,value) / maximum * 155)) if value > 0 else 0
+            return (f'<div style="flex:1;min-width:0;text-align:center">'
+                    f'<div style="font-size:clamp(11px,2vw,15px);font-weight:700;color:{color};'
+                    f'white-space:nowrap">{money(value)}</div>'
+                    f'<div style="height:165px;display:flex;align-items:flex-end;justify-content:center">'
+                    f'<div style="height:{height}px;width:80%;background:{color};'
+                    f'border-radius:5px 5px 0 0"></div></div></div>')
+    for old, new, label in zip(original, changed, labels):
+        cards.append('<div style="flex:1;min-width:0;text-align:center">'
+                     '<div style="display:flex;gap:5px;align-items:start">'
+                     +bar(old,color_bad)+bar(new,color_good)+'</div>'
+                     f'<div style="font-size:13px;font-weight:700;margin-top:7px">{label}</div></div>')
+    st.markdown('<div style="display:flex;gap:10px;margin:12px 0 4px;padding-bottom:12px">'
+                + ''.join(cards) + '</div>', unsafe_allow_html=True)
+    st.markdown('<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:14px;margin:0 0 15px">'
+                '<span><b style="color:#c52332">■</b> No changes</span>'
+                '<span><b style="color:#168a50">■</b> With your selected cuts</span>'
+                + ('<span><b style="color:#991b1b">■</b> Below zero = money still needed</span>' if unit == "savings" else '')
+                + '</div>', unsafe_allow_html=True)
 
 st.title("🧭 Borrowed Wisdom")
 st.caption("What do I need to do today?  |  Financial data bridge · Fictional examples")
@@ -287,22 +335,59 @@ elif view=="Spend less":
     with st.expander("Show spending by category"):
         st.dataframe(by_cat[["Category","net_spend"]].rename(columns={"net_spend":"Net spending ($)"}),use_container_width=True,hide_index=True)
 else:
-    st.subheader("See my future")
-    selected=total_selected()
-    after=max(0.,shortfall-selected)
-    st.markdown(f"**No changes: {money(shortfall)} monthly gap. With selected cuts: {money(after)} monthly gap.**")
-    st.caption("Illustrative only: assumes the latest month's income and spending repeat each month. This is not an account-balance forecast.")
-    if shortfall>0:
-        import altair as alt
-        future=pd.DataFrame({"Months":[3,6,12],"No changes":[shortfall*x for x in (3,6,12)],"With selected cuts":[after*x for x in (3,6,12)]})
-        long=future.melt("Months",var_name="Scenario",value_name="Additional money needed")
-        chart=alt.Chart(long).mark_bar().encode(x=alt.X("Months:O",title="Months ahead"),xOffset="Scenario:N",y=alt.Y("Additional money needed:Q",title="Additional money needed ($)"),color=alt.Color("Scenario:N",scale=alt.Scale(domain=["No changes","With selected cuts"],range=["#c52332","#168a50"])),tooltip=["Scenario","Months",alt.Tooltip("Additional money needed:Q",format=",.0f")]).properties(height=290)
-        st.altair_chart(chart,use_container_width=True)
-        st.error(f"**Without changes, you would need {money(shortfall*12)} more over 12 months. Where will you get the money?**")
-        st.success(f"**If you make your selected cuts, the 12-month gap becomes {money(after*12)}.**")
-        st.button("Go back to spending choices",use_container_width=True,on_click=change_screen,args=("Spend less",))
+    st.subheader("SHOW ME THE MONEY!")
+    selected = total_selected()
+    after = max(0., shortfall-selected)
+    if shortfall > 0:
+        st.markdown(f"**You spend {money(shortfall)} more than you earn each month. Where will you get the money?**")
+        st.markdown(
+            '<div style="display:flex;gap:12px;flex-wrap:wrap;margin:16px 0 20px">'
+            f'<div style="flex:1;min-width:180px;border-left:5px solid #c52332;background:#fff1f2;padding:14px;border-radius:8px">'
+            f'<div style="font-size:15px;font-weight:700">No changes</div>'
+            f'<div style="font-size:25px;font-weight:800;color:#aa202b">{money(shortfall)} / month</div></div>'
+            f'<div style="flex:1;min-width:180px;border-left:5px solid #168a50;background:#eefaf2;padding:14px;border-radius:8px">'
+            f'<div style="font-size:15px;font-weight:700">With your selected cuts</div>'
+            f'<div style="font-size:25px;font-weight:800;color:#127846">{money(after)} / month</div></div></div>',
+            unsafe_allow_html=True,
+        )
+        funding = st.radio("How are you covering the extra spending?", ["Using savings", "Using a credit card"], horizontal=True, key="bw2_funding")
+        periods = [0, 3, 6, 12]
+        labels = ["Today", "3 months", "6 months", "12 months"]
+        if funding == "Using savings":
+            savings = st.number_input("Savings available ($)", min_value=0, max_value=1000000, value=10000, step=100, key="bw2_savings")
+            without = [savings - shortfall*m for m in periods]
+            with_cuts = [savings - after*m for m in periods]
+            st.markdown("**How much money will you have—or still need?**")
+            compare_bars(without, with_cuts, labels, "savings")
+            months_to_empty = ceil(savings/shortfall) if savings else 0
+            st.error(f"**If nothing changes, your {money(savings)} savings run out in about {months_to_empty} months.**")
+            if without[-1] < 0:
+                st.error(f"**At 12 months, your savings are gone. You still need {money(-without[-1])}. Where will you get the money?**")
+            if selected:
+                if with_cuts[-1] >= 0:
+                    st.success(f"**With your selected cuts, you could have {money(with_cuts[-1])} left after 12 months.**")
+                else:
+                    st.warning(f"**Even with your selected cuts, you would still need {money(-with_cuts[-1])} after 12 months.**")
+            st.caption("Illustration assumes the latest month's net spending gap repeats, no savings interest and no other activity. Below zero means an unfunded shortage, not a negative bank balance. Proposed cuts are not confirmed savings.")
+        else:
+            def debt(gap):
+                balance=0.0
+                totals=[0.0]
+                for m in range(1,13):
+                    balance=balance*(1+0.25/12)+gap
+                    if m in (3,6,12): totals.append(balance)
+                return totals
+            without=debt(shortfall)
+            with_cuts=debt(after)
+            st.markdown("**How much could you owe?**")
+            compare_bars(without,with_cuts,labels,"debt")
+            st.error(f"**After 12 months, without changes you could owe {money(without[-1])}. Where will you get the money?**")
+            if selected:
+                st.success(f"**With your selected cuts, you could owe {money(with_cuts[-1])}.**")
+            st.caption("Illustration: 25% APR, monthly compounding, additional borrowing at the end of each month, no repayments or fees. Actual credit cards require payments and have varying terms.")
+        st.button("← Go back to ways to spend less",type="primary",use_container_width=True,on_click=change_screen,args=("Spend less",))
     else:
-        st.success("No monthly gap appears in the latest reported month. We still need balances and upcoming bills to predict your future.")
+        st.success("The latest reported month does not show a shortage. Account balances and upcoming bills are needed to project future cash.")
 
 if flags:
     with st.expander("Items to review in your accounting software"):
