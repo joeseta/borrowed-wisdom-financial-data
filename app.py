@@ -167,9 +167,16 @@ latest_number = next(i for i, name in enumerate(calendar.month_name) if name == 
 recent = df[(df["kind"] == "Expense") & (df["month_num"] == latest_number)].copy()
 recent["net_spend"] = -recent["signed"]
 by_cat = recent.groupby("Category",as_index=False)["net_spend"].sum()
-optional_pattern = r"restaurant|dining|bar|entertainment|shopping|clothing|subscriptions?|coffee|takeout|fast food|travel|recreation|hobbies|wine"
-optional = by_cat[by_cat["Category"].str.contains(optional_pattern,case=False,regex=True)]
-optional = optional[optional["net_spend"] > 0].sort_values("net_spend",ascending=False).head(8)
+# Show every spending category in the CSV, not just the categories that
+# match a discretionary-spending keyword list. The user makes the decision.
+spend_categories = by_cat[by_cat["net_spend"] > 0].sort_values(
+    "net_spend", ascending=False
+).reset_index(drop=True)
+
+# For essential obligations, let the user explore potential future reductions,
+# but don't offer the one-click "All" option (which could imply skipping bills).
+def essential_category(category: str) -> bool:
+    return bool(re.search(r"\b(rent|mortgage|housing|utilities|electric|water|insurance|medical|healthcare|tuition|childcare|loan payment)\b", category, re.I))
 
 # Saved plan keys are NOT widget keys. They persist when a screen is hidden.
 def keys(cat):
@@ -193,7 +200,7 @@ def all_choice(cat, maximum):
 
 def total_selected():
     total=0.
-    for _,r in optional.iterrows():
+    for _,r in spend_categories.iterrows():
         a,b,_,_=keys(str(r["Category"]))
         if st.session_state.get(a,False):
             total += min(float(r["net_spend"]),max(0.,float(st.session_state.get(b,0.))))
@@ -233,11 +240,11 @@ elif view=="Spend less":
         st.success("The latest month shows no reported shortage. Review future bills before spending what remains.")
     else:
         st.markdown(f"**You need to reduce monthly spending by {money(shortfall)}. Start here.**")
-        st.caption("Choose what you’ll stop or reduce. Nothing is selected for you.")
-        if optional.empty:
-            st.info("No clearly optional spending categories were found in the latest month's summary.")
+        st.caption("Choose what you’ll stop or reduce. Nothing is selected for you. Essential bills must still be paid unless their cost actually changes.")
+        if spend_categories.empty:
+            st.info("No expense categories with positive net spending were found in the latest month's summary.")
         else:
-            for _,r in optional.iterrows():
+            for _,r in spend_categories.iterrows():
                 cat=str(r["Category"]); maximum=round(float(r["net_spend"]),2)
                 saved_yes,saved_amt,ui_yes,ui_amt=keys(cat)
                 st.session_state.setdefault(saved_yes,False)
@@ -261,11 +268,14 @@ elif view=="Spend less":
                                 on_change=keep_choice, args=(cat,)
                             )
                         with all_col:
-                            st.button("All", key=ui_yes+"_all", on_click=all_choice,
-                                      args=(cat,maximum), use_container_width=True,
-                                      help=f"Stop all {money(maximum)} of this spending")
+                            if not essential_category(cat):
+                                st.button("All", key=ui_yes+"_all", on_click=all_choice,
+                                          args=(cat,maximum), use_container_width=True,
+                                          help=f"Stop all {money(maximum)} of this spending")
+                            else:
+                                st.caption("Review first")
                     else:
-                        st.caption(f"Available to reduce: {money(maximum)}")
+                        st.caption("Essential / review first" if essential_category(cat) else "Choose to reduce")
             selected=total_selected()
             remaining=max(0.,shortfall-selected)
             a,b=st.columns(2)
