@@ -143,7 +143,18 @@ monthly.index = [calendar.month_name[int(i)] for i in monthly.index]
 monthly.index.name = "Month"
 
 show = monthly[["Income", "Spending", "Difference"]].copy()
-st.dataframe(show.style.format("${:,.2f}"), use_container_width=True)
+# Use the same financial colors throughout Borrowed Wisdom.
+def difference_color(value):
+    if value < -0.005:
+        return "color: #b91c1c; font-weight: 700;"
+    if value > 0.005:
+        return "color: #15803d; font-weight: 700;"
+    return "color: #334155; font-weight: 600;"
+
+st.dataframe(
+    show.style.format("${:,.2f}").apply(lambda column: column.map(difference_color), subset=["Difference"]),
+    use_container_width=True,
+)
 
 latest = monthly.iloc[-1]
 month = monthly.index[-1]
@@ -153,6 +164,26 @@ if latest["Difference"] < 0:
 else:
     st.success(f"**{month}: Your reported income covered your spending, with ${latest['Difference']:,.0f} remaining.**")
     st.markdown("**What do I need to do today?** Check upcoming bills before deciding this money is available to spend.")
+
+# The uploaded data is a historical category summary, not a forecast.
+# Offer an optional, focused first action based on the latest month's visible categories.
+if latest["Difference"] < 0:
+    with st.expander("Show me where I can spend less"):
+        latest_number = int(next(i for i, name in enumerate(calendar.month_name) if name == month))
+        recent = df[(df["kind"] == "Expense") & (df["month_num"] == latest_number)].copy()
+        recent["net_spend"] = -recent["signed"]
+        by_category = recent.groupby("Category", as_index=False)["net_spend"].sum()
+        # Never suggest cutting necessities such as groceries, housing, or utilities by default.
+        optional_pattern = r"restaurant|dining|bar|entertainment|shopping|clothing|subscriptions?|coffee|takeout|fast food|travel|recreation|hobbies|wine"
+        optional = by_category[by_category["Category"].str.contains(optional_pattern, case=False, regex=True)]
+        optional = optional[optional["net_spend"] > 0].sort_values("net_spend", ascending=False)
+        if optional.empty:
+            st.write("This summary doesn't clearly identify optional expenses to cut. Review your categories in your accounting software.")
+        else:
+            st.write(f"**{month} spending you can review:**")
+            for _, item in optional.head(6).iterrows():
+                st.write(f"**{item['Category']}** — ${item['net_spend']:,.0f}")
+            st.info("These are past category totals, not confirmed savings. Decide what you can stop or reduce; then check next month's results.")
 
 st.subheader("Money coming in vs. money going out")
 plot = monthly[["Income", "Spending"]].copy()
