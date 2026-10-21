@@ -242,13 +242,27 @@ elif view=="Spend less":
                 # Restore widget values when returning to this screen.
                 if ui_yes not in st.session_state: st.session_state[ui_yes]=st.session_state[saved_yes]
                 if ui_amt not in st.session_state: st.session_state[ui_amt]=min(maximum,float(st.session_state[saved_amt]))
-                a,b,c=st.columns([4,3,1],vertical_alignment="bottom")
-                with a:
-                    st.checkbox(f"{cat} · {money(maximum)}",key=ui_yes,on_change=keep_choice,args=(cat,))
-                with b:
-                    st.number_input("Reduce by ($)",min_value=0.0,max_value=maximum,step=10.0,key=ui_amt,on_change=keep_choice,args=(cat,),disabled=not st.session_state[ui_yes])
-                with c:
-                    st.button("All",key=ui_yes+"_all",on_click=all_choice,args=(cat,maximum),help=f"Reduce the full {money(maximum)}")
+                # Match Phase 1's compact, aligned expense table.
+                left, mid, right = st.columns([2.7, 1.3, 2.0], vertical_alignment="center")
+                with left:
+                    active = st.checkbox(cat, key=ui_yes, on_change=keep_choice, args=(cat,))
+                with mid:
+                    st.write(money(maximum))
+                with right:
+                    if active:
+                        amount_col, all_col = st.columns([3, 1], vertical_alignment="center")
+                        with amount_col:
+                            st.number_input(
+                                f"Spend less on {cat}", min_value=0.0, max_value=maximum,
+                                step=10.0, key=ui_amt, label_visibility="collapsed",
+                                on_change=keep_choice, args=(cat,)
+                            )
+                        with all_col:
+                            st.button("All", key=ui_yes+"_all", on_click=all_choice,
+                                      args=(cat,maximum), use_container_width=True,
+                                      help=f"Stop all {money(maximum)} of this spending")
+                    else:
+                        st.caption("Select to reduce")
             selected=total_selected()
             remaining=max(0.,shortfall-selected)
             a,b=st.columns(2)
