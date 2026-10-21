@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import calendar
 import io
+import hashlib
 import re
 from datetime import date
 
@@ -24,7 +25,7 @@ div.stButton > button {border: 1.5px solid #194f94; color:#194f94; font-weight:6
 </style>""", unsafe_allow_html=True)
 
 st.title("🧭 Borrowed Wisdom")
-st.caption("Phase 2 · Financial data bridge · Fictional examples only")
+st.caption("Phase 2 · Financial data bridge · Version 1.2 · Fictional examples only")
 st.warning("Public demonstration. Upload only **fictional category-summary CSV files**. Do not upload real personal or family financial data.")
 
 DEMO = """Income/Expense,Category,Month,Amount
@@ -165,25 +166,59 @@ else:
     st.success(f"**{month}: Your reported income covered your spending, with ${latest['Difference']:,.0f} remaining.**")
     st.markdown("**What do I need to do today?** Check upcoming bills before deciding this money is available to spend.")
 
-# The uploaded data is a historical category summary, not a forecast.
-# Offer an optional, focused first action based on the latest month's visible categories.
+# This action planner only uses category totals, never transaction-level data.
+# Display suggestions without selecting them for the person.
 if latest["Difference"] < 0:
-    with st.expander("Show me where I can spend less"):
+    with st.expander("Help me spend less", expanded=False):
         latest_number = int(next(i for i, name in enumerate(calendar.month_name) if name == month))
         recent = df[(df["kind"] == "Expense") & (df["month_num"] == latest_number)].copy()
         recent["net_spend"] = -recent["signed"]
         by_category = recent.groupby("Category", as_index=False)["net_spend"].sum()
-        # Never suggest cutting necessities such as groceries, housing, or utilities by default.
         optional_pattern = r"restaurant|dining|bar|entertainment|shopping|clothing|subscriptions?|coffee|takeout|fast food|travel|recreation|hobbies|wine"
         optional = by_category[by_category["Category"].str.contains(optional_pattern, case=False, regex=True)]
-        optional = optional[optional["net_spend"] > 0].sort_values("net_spend", ascending=False)
+        optional = optional[optional["net_spend"] > 0].sort_values("net_spend", ascending=False).head(8)
+        target = max(0.0, float(-latest["Difference"]))
+        st.markdown(f"**You need to find ${target:,.0f}. Start with spending you can control.**")
         if optional.empty:
-            st.write("This summary doesn't clearly identify optional expenses to cut. Review your categories in your accounting software.")
+            st.info("No clearly optional categories were identified. Review your spending categories in your accounting software.")
         else:
-            st.write(f"**{month} spending you can review:**")
-            for _, item in optional.head(6).iterrows():
-                st.write(f"**{item['Category']}** — ${item['net_spend']:,.0f}")
-            st.info("These are past category totals, not confirmed savings. Decide what you can stop or reduce; then check next month's results.")
+            st.caption("Choose what you'll reduce. Nothing is selected for you. Amounts are plans, not money already saved.")
+            # A fingerprint scopes the temporary on-screen choices to this file and month.
+            fingerprint = hashlib.sha256(df[["Income/Expense", "Category", "Month", "Amount"]].to_csv(index=False).encode()).hexdigest()[:12]
+            total_savings = 0.0
+            for idx, row in optional.iterrows():
+                category = str(row["Category"])
+                maximum = round(float(row["net_spend"]), 2)
+                suffix = hashlib.sha256(category.encode()).hexdigest()[:10]
+                key_base = f"cut_{fingerprint}_{month}_{suffix}"
+                check_key = key_base + "_yes"
+                amount_key = key_base + "_amount"
+                if check_key not in st.session_state:
+                    st.session_state[check_key] = False
+                if amount_key not in st.session_state:
+                    st.session_state[amount_key] = 0.0
+                st.session_state[amount_key] = max(0.0, min(maximum, float(st.session_state[amount_key])))
+                label_col, amount_col, all_col = st.columns([4, 3, 1], vertical_alignment="bottom")
+                with label_col:
+                    chosen = st.checkbox(f"{category} — ${maximum:,.0f} spent", key=check_key)
+                with amount_col:
+                    reduction = st.number_input("Reduce by ($)", min_value=0.0, max_value=maximum, step=10.0, key=amount_key, label_visibility="visible", disabled=not chosen)
+                with all_col:
+                    if st.button("All", key=key_base + "_all", help=f"Reduce all ${maximum:,.0f} from {category}"):
+                        st.session_state[check_key] = True
+                        st.session_state[amount_key] = maximum
+                        st.rerun()
+                if chosen:
+                    total_savings += reduction
+            remaining = max(0.0, target - total_savings)
+            first, second = st.columns(2)
+            first.metric("You plan to spend less", f"${total_savings:,.0f}/month")
+            second.metric("Still need to find", f"${remaining:,.0f}/month")
+            if remaining > 0.005:
+                st.warning(f"Your selected reductions leave ${remaining:,.0f} to find. You cannot keep spending more than you earn.")
+            else:
+                st.success("Your selected cuts could cover the reported shortage. Now put the changes into action.")
+            st.caption("Based on the latest reported month's spending only. Check whether expenses and income are recurring before treating this as a monthly plan.")
 
 st.subheader("Money coming in vs. money going out")
 plot = monthly[["Income", "Spending"]].copy()
